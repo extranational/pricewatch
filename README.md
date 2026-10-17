@@ -62,6 +62,26 @@ widen what a job can be blocked on.
 `tag` matters where one provider sells the same model on several tiers (`baidu/fp8` vs
 `baidu/fp4`). Pinning a tag that has disappeared reads as drift, never as a wrong-but-cheap match.
 
+### Unpinned jobs: `"provider": "*"`
+
+A job pinned to a *model* but no endpoint (Hermes agent jobs pinned to `deepseek-v4.1-flash`
+on "openrouter", say) has no single price: OpenRouter load-balances it across every endpoint by
+price. So there is nothing to compare — instead the watch tracks the **floor**: the cheapest
+prompt and completion price on offer and which endpoint offers them.
+
+Drift rules differ deliberately in this mode:
+
+- an **increase** in the floor, or the cheapest endpoint changing host, **holds** the job — that
+  is the spend risk;
+- a **decrease** is reported as information (`cheaper endpoint available`), not a hold — a
+  cheaper option appearing is a reason to pin, not a reason to block a run;
+- an **endpoint-count** change is information only; providers join and leave constantly.
+
+A floor watch on `deepseek/deepseek-v4.1-flash` put the spread in context: 35 endpoints, cheapest
+$0.09/$0.18 per M — a 10x+ spread against the most expensive hosts, which is exactly what an
+unpinned alias is exposed to.
+
+
 ## Discovery — keeping the registry honest
 
 Three layers, because each fails differently:
