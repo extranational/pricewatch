@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-17T18:36:59+00:00",
+  "watches": [
+    {
+      "job": "pharmawatch",
+      "model": "deepseek/deepseek-v4-pro-0813",
+      "provider": "StreamLake",
+      "baseline": {
+        "prompt": "6.6E-7",
+        "completion": "0.00000198",
+        "discount": "0.5"
+      },
+      "alias": "pharma-deepseek",
+      "tag": "streamlake",
+      "accepted_at": "2026-10-17T18:36:59+00:00",
+      "accepted_by": "hermes",
+      "note": "seeded 2026-10-17"
+    },
+    {
+      "job": "pharmawatch",
+      "model": "qwen/qwen3.7-max",
+      "provider": "Alibaba",
+      "baseline": {
+        "prompt": "0.000001475",
+        "completion": "0.000004425",
+        "discount": "0"
+      },
+      "alias": "pharma-qwen",
+      "tag": "",
+      "accepted_at": "2026-10-17T18:36:59+00:00",
+      "accepted_by": "hermes",
+      "note": "seeded 2026-10-17"
+    }
+  ]
+}
