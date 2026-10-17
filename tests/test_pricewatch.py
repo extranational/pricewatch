@@ -7,7 +7,8 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-from pricewatch.catalog import compare, find_endpoint, snapshot
+from pricewatch.catalog import aggregate_snapshot, compare, compare_aggregate, find_endpoint, snapshot
+from pricewatch.check import CheckResult, baseline_from, is_aggregate
 from pricewatch.discover import _skip
 from pricewatch.registry import Registry, Watch
 
@@ -94,6 +95,57 @@ class TestRegistry(unittest.TestCase):
                   tag="streamlake", baseline={})
         self.assertNotIn("/", w.slug)
         self.assertNotIn(":", w.slug)
+
+
+class TestAggregateWatch(unittest.TestCase):
+    """Unpinned jobs watch the *floor*: any increase or promo change holds, a decrease informs."""
+
+    def setUp(self):
+        self.base = aggregate_snapshot(ENDPOINTS)
+
+    def test_floor_is_the_cheapest_endpoint(self):
+        self.assertEqual(self.base["min_prompt"], Decimal("0.00000013332"))
+        self.assertEqual(self.base["min_prompt_provider"], "Baidu")
+        self.assertEqual(self.base["endpoints"], 3)
+
+    def test_unchanged_floor_is_no_drift(self):
+        reasons, notes = compare_aggregate(self.base, aggregate_snapshot(ENDPOINTS))
+        self.assertEqual(reasons, [])
+        self.assertEqual(notes, [])
+
+    def test_floor_rise_holds(self):
+        live = dict(self.base, min_completion=Decimal("0.000004"), min_completion_provider="Together")
+        reasons, _ = compare_aggregate(self.base, live)
+        self.assertTrue(any("ROSE" in r for r in reasons))
+        self.assertTrue(any("Baidu -> Together" in r for r in reasons))
+
+    def test_floor_drop_is_a_note_not_a_hold(self):
+        live = dict(self.base, min_prompt=Decimal("0.00000001"))
+        reasons, notes = compare_aggregate(self.base, live)
+        self.assertEqual(reasons, [])
+        self.assertTrue(any("cheaper endpoint available" in n for n in notes))
+
+    def test_endpoint_count_change_is_only_a_note(self):
+        live = dict(self.base, endpoints=21)
+        reasons, notes = compare_aggregate(self.base, live)
+        self.assertEqual(reasons, [])
+        self.assertIn("endpoint count 3 -> 21", notes)
+
+    def test_mode_is_driven_by_the_provider_field(self):
+        agg = Watch(job="b", model="m", provider="*", baseline={})
+        pinned = Watch(job="b", model="m", provider="StreamLake", baseline={})
+        self.assertTrue(is_aggregate(agg))
+        self.assertFalse(is_aggregate(pinned))
+
+
+class TestBaselineFrom(unittest.TestCase):
+    def test_aggregate_baseline_is_json_safe_strings(self):
+        w = Watch(job="b", model="m", provider="*", baseline={})
+        result = CheckResult(watch=w, status="ok", live=aggregate_snapshot(ENDPOINTS))
+        blob = baseline_from(result)
+        json.dumps(blob)  # must not raise: everything is a str/int
+        self.assertEqual(blob["min_prompt"], "0.00000013332")
+        self.assertEqual(blob["endpoints"], 3)
 
 
 class TestDiscoveryFilter(unittest.TestCase):

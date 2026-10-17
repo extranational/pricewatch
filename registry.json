@@ -1,19 +1,19 @@
 {
   "version": 1,
-  "updated_at": "2026-10-17T18:36:59+00:00",
+  "updated_at": "2026-10-17T19:14:07+00:00",
   "watches": [
     {
       "job": "pharmawatch",
       "model": "deepseek/deepseek-v4-pro-0813",
       "provider": "StreamLake",
       "baseline": {
-        "prompt": "6.6E-7",
+        "prompt": "0.00000066",
         "completion": "0.00000198",
         "discount": "0.5"
       },
       "alias": "pharma-deepseek",
       "tag": "streamlake",
-      "accepted_at": "2026-10-17T18:36:59+00:00",
+      "accepted_at": "2026-10-17T19:13:57+00:00",
       "accepted_by": "hermes",
       "note": "seeded 2026-10-17"
     },
@@ -28,9 +28,43 @@
       },
       "alias": "pharma-qwen",
       "tag": "",
-      "accepted_at": "2026-10-17T18:36:59+00:00",
+      "accepted_at": "2026-10-17T19:13:57+00:00",
       "accepted_by": "hermes",
       "note": "seeded 2026-10-17"
+    },
+    {
+      "job": "baltimore-report",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "provider": "*",
+      "baseline": {
+        "min_prompt": "0.00000009",
+        "min_prompt_provider": "Decart",
+        "min_completion": "0.00000018",
+        "min_completion_provider": "Decart",
+        "endpoints": 35
+      },
+      "alias": "",
+      "tag": null,
+      "accepted_at": "2026-10-17T19:14:06+00:00",
+      "accepted_by": "hermes",
+      "note": "cron 217a38c114f8; unpinned model -> floor watch"
+    },
+    {
+      "job": "dmarc-report-check",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "provider": "*",
+      "baseline": {
+        "min_prompt": "0.00000009",
+        "min_prompt_provider": "Decart",
+        "min_completion": "0.00000018",
+        "min_completion_provider": "Decart",
+        "endpoints": 35
+      },
+      "alias": "",
+      "tag": null,
+      "accepted_at": "2026-10-17T19:14:07+00:00",
+      "accepted_by": "hermes",
+      "note": "cron 9b605f1cc103; unpinned model -> floor watch"
     }
   ]
 }

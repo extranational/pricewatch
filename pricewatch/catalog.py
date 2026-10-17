@@ -121,6 +121,59 @@ def per_million(value: Decimal | None) -> str:
     return f"${value * Decimal(1_000_000):.4f}/M"
 
 
+AGG_KEYS = ("min_prompt", "min_completion")
+
+
+def aggregate_snapshot(data: dict) -> dict:
+    """The price *floor* of an unpinned model: cheapest prompt and completion price on offer,
+    and which endpoint(s) offer them. Used when a job pins no provider, so there is no single
+    price to compare — the risk is the floor moving (a promo ending at the cheap host)."""
+    endpoints = data.get("endpoints") or []
+
+    def cheapest(key: str):
+        best = None
+        for e in endpoints:
+            value = _dec((e.get("pricing") or {}).get(key))
+            if value is None:
+                continue
+            if best is None or value < best[0]:
+                best = (value, e.get("provider_name") or "", e.get("tag") or "")
+        return best
+
+    prompt, comp = cheapest("prompt"), cheapest("completion")
+    return {
+        "min_prompt": prompt[0] if prompt else None,
+        "min_prompt_provider": prompt[1] if prompt else "",
+        "min_completion": comp[0] if comp else None,
+        "min_completion_provider": comp[1] if comp else "",
+        "endpoints": len(endpoints),
+    }
+
+
+def compare_aggregate(baseline: dict, live: dict) -> tuple[list[str], list[str]]:
+    """(reasons, notes) — reasons hold the job, notes are information only."""
+    reasons: list[str] = []
+    notes: list[str] = []
+    for key, label in (("min_prompt", "cheapest prompt price"),
+                       ("min_completion", "cheapest completion price")):
+        was, now = _dec(baseline.get(key)), live.get(key)
+        if was is None or now is None or was == now:
+            continue
+        was_host = baseline.get(f"{key}_provider") or "?"
+        now_host = live.get(f"{key}_provider") or "?"
+        where = "" if was_host == now_host else f" ({was_host} -> {now_host})"
+        pct = _percent_note(key, was, now)
+        if now > was:
+            reasons.append(f"{label} ROSE {was} -> {now}{pct}{where}")
+        else:
+            notes.append(f"{label} fell {was} -> {now}{pct}{where} — cheaper endpoint available")
+    was_n, now_n = baseline.get("endpoints"), live.get("endpoints")
+    if was_n is not None and now_n is not None and was_n != now_n:
+        notes.append(f"endpoint count {was_n} -> {now_n}")
+    return reasons, notes
+
+
+
 def usage_cost_usd(prompt_per_token: Decimal | None, completion_per_token: Decimal | None,
                    in_tokens: int, out_tokens: int) -> Decimal:
     return (prompt_per_token or Decimal(0)) * in_tokens + (

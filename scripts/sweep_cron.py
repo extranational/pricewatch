@@ -13,6 +13,9 @@ stderr, and only a crash of the sweep itself exits non-zero.
 Dedupe/throttle: a drift signature is latched. The same unchanged condition re-alerts at most
 once per THROTTLE_HOURS, because a promo that ends stays ended until a human re-accepts — a
 fire-once latch would make the second and subsequent 6-hourly sweeps silent forever.
+
+Watch-mode dispatch lives in `pricewatch.check`, so this script and the CLI can never disagree
+about what counts as drift (pinned endpoint vs the floor of an unpinned model).
 """
 from __future__ import annotations
 
@@ -26,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pricewatch import catalog  # noqa: E402
+from pricewatch.check import check_watch, is_aggregate  # noqa: E402
 from pricewatch.registry import Registry  # noqa: E402
 
 THROTTLE_HOURS = 24
@@ -38,9 +41,13 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def signature_of(drift: list[tuple], unverifiable: list[tuple]) -> str:
-    parts = [f"{w.key}::{'|'.join(r) if isinstance(r, list) else r}" for w, r in drift]
-    parts += [f"{w.key}::unverifiable::{e}" for w, e in unverifiable]
+def signature_of(results: list) -> str:
+    parts = []
+    for r in results:
+        for reason in r.reasons:
+            parts.append(f"{r.watch.key}::drift::{reason}")
+        if r.status == "unverifiable":
+            parts.append(f"{r.watch.key}::unverifiable::{r.error}")
     return hashlib.sha1("\n".join(sorted(parts)).encode()).hexdigest()[:16]
 
 
@@ -64,37 +71,41 @@ def per_million(v) -> str:
     return f"${Decimal(str(v)) * Decimal(1_000_000):.4f}/M"
 
 
+def describe(w, live: dict) -> str:
+    if is_aggregate(w):
+        return (f"floor {per_million(live.get('min_prompt'))} in "
+                f"({live.get('min_prompt_provider') or '?'}) / "
+                f"{per_million(live.get('min_completion'))} out "
+                f"({live.get('min_completion_provider') or '?'}); "
+                f"{live.get('endpoints')} endpoints")
+    return (f"{per_million(live.get('prompt'))} in / {per_million(live.get('completion'))} out "
+            f"(discount {live.get('discount')})")
+
+
+def target_of(w) -> str:
+    if is_aggregate(w):
+        return "any endpoint (unpinned: watching the price floor)"
+    return w.provider + (f"/{w.tag}" if w.tag else "")
+
+
 def main() -> int:
     reg = Registry.load()
     if not reg.watches:
         log("pricewatch: registry empty — nothing to sweep")
         return 0
 
-    drift, unverifiable = [], []
-    for w in reg.watches:
-        try:
-            data = catalog.fetch_endpoints(w.model)
-            endpoint = catalog.find_endpoint(data, w.provider, w.tag)
-            if endpoint is None:
-                drift.append((w, f"provider {w.provider}"
-                                 + (f"/{w.tag}" if w.tag else "")
-                                 + " no longer serves this model"))
-                continue
-            live = catalog.snapshot(endpoint)
-            if not w.baseline:
-                drift.append((w, "no accepted baseline (run `pricewatch accept`)"))
-                continue
-            reasons = catalog.compare(w.baseline, live)
-            if reasons:
-                drift.append((w, reasons, live))
-        except catalog.Unverifiable as exc:
-            unverifiable.append((w, str(exc)))
+    results = [check_watch(w) for w in reg.watches]
+    drift = [r for r in results if r.status == "drift"]
+    unknown = [r for r in results if r.status == "unverifiable"]
+    notes = [(r, note) for r in results for note in r.notes]
 
-    if not drift and not unverifiable:
+    if not drift and not unknown:
+        for r, note in notes:
+            log(f"pricewatch: {r.watch.key}: {note}")
         log(f"pricewatch: nominal — {len(reg.watches)} watch(es) unchanged")
         return 0
 
-    sig = signature_of([(w, r) for w, r, *_ in drift], unverifiable)
+    sig = signature_of(results)
     latch = read_latch()
     if latch.get("signature") == sig:
         try:
@@ -106,22 +117,18 @@ def main() -> int:
                 f"— throttled")
             return 0
 
-    lines = ["*pricewatch* — watched OpenRouter endpoint changed"]
-    for row in drift:
-        w, reasons = row[0], row[1]
-        live = row[2] if len(row) > 2 else None
-        why = "; ".join(reasons) if isinstance(reasons, list) else reasons
-        lines.append(f"• HOLD `{w.job}` — {w.model} @ {w.provider}"
-                     + (f"/{w.tag}" if w.tag else ""))
-        lines.append(f"    {why}")
-        if live:
-            b = w.baseline or {}
-            lines.append(f"    accepted {per_million(b.get('prompt'))} in / "
-                         f"{per_million(b.get('completion'))} out (discount {b.get('discount')})"
-                         f"  ->  now {per_million(live['prompt'])} in / "
-                         f"{per_million(live['completion'])} out (discount {live['discount']})")
-    for w, err in unverifiable:
-        lines.append(f"• CANNOT VERIFY `{w.job}` — {w.model} @ {w.provider}: {err}")
+    lines = ["*pricewatch* — watched OpenRouter endpoint changed" if drift
+             else "*pricewatch* — catalog unreachable"]
+    for r in drift:
+        lines.append(f"• HOLD `{r.watch.job}` — {r.watch.model} @ {target_of(r.watch)}")
+        lines.append(f"    {'; '.join(r.reasons) or 'no baseline'}")
+        if r.live:
+            lines.append(f"    accepted {describe(r.watch, r.watch.baseline)}  ->  now "
+                         f"{describe(r.watch, r.live)}")
+    for r in unknown:
+        lines.append(f"• CANNOT VERIFY `{r.watch.job}` — {r.watch.model}: {r.error}")
+    for r, note in notes:
+        lines.append(f"• info `{r.watch.job}`: {note}")
     lines.append("Nothing is blocked until a job's step-0 runs. To accept the new price: "
                  "`pricewatch accept --job <job>`.")
 
